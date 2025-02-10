@@ -121,4 +121,4 @@ wsproto==1.2.0
 yarl==1.9.7
 zipp==3.21.0
 brotli
-webdriver-manager==4.0.1
+webdriver-manager==4.0.1 
