@@ -7,6 +7,22 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 # Import regex functions from regex.py (ensure this file exists and exports them)
 from regex import get_postcode_regex, get_phone_regex
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+
+def setup_chrome_options():
+    chrome_options = Options()
+    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--disable-gpu')
+    return chrome_options
+
+def initialize_driver():
+    options = setup_chrome_options()
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
+    return driver
 
 def get_address_from_duckduckgo(name):
     """
@@ -15,25 +31,8 @@ def get_address_from_duckduckgo(name):
     query = f"{name} address"
     search_url = f"https://duckduckgo.com/?q={query}"
     
-    chrome_options = Options()
-    # Modified Chrome options to handle GPU/graphics errors
-    chrome_options.add_argument("--headless=new")  # Use new headless mode
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-software-rasterizer")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-gl-drawing-for-tests")
-    chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-    chrome_options.add_argument("--ignore-certificate-errors")
-    chrome_options.add_argument("--window-size=1920,1080")
-    
     try:
-        from selenium.webdriver.chrome.service import Service
-        from webdriver_manager.chrome import ChromeDriverManager
-        
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver = initialize_driver()
         
         print(f"Searching DuckDuckGo for: {query}")
         driver.get(search_url)
