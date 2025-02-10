@@ -1,66 +1,51 @@
 import re
 import traceback
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from playwright.sync_api import sync_playwright
 # Import regex functions from regex.py (ensure this file exists and exports them)
 from regex import get_postcode_regex, get_phone_regex
 
 def get_address_from_duckduckgo(name):
     """
-    Searches DuckDuckGo for "<name> address" and scrapes all text from results.
+    Searches DuckDuckGo for "<name> address" using Playwright instead of Selenium.
     """
     query = f"{name} address"
     search_url = f"https://duckduckgo.com/?q={query}"
     
-    chrome_options = Options()
-    # Modified Chrome options to handle GPU/graphics errors
-    chrome_options.add_argument("--headless=new")  # Use new headless mode
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-software-rasterizer")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-gl-drawing-for-tests")
-    chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-    chrome_options.add_argument("--ignore-certificate-errors")
-    chrome_options.add_argument("--window-size=1920,1080")
-    
     try:
-        from selenium.webdriver.chrome.service import Service
-        from webdriver_manager.chrome import ChromeDriverManager
-        
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        
-        print(f"Searching DuckDuckGo for: {query}")
-        driver.get(search_url)
-        
-        # Wait for any content to load
-        driver.implicitly_wait(5)
-        
-        # Get all text from the page
-        body_text = driver.find_element(By.TAG_NAME, "body").text
-        print("Raw page text:")
-        print("-" * 50)
-        print(body_text[:1000])  # Print first 1000 chars for debugging
-        print("-" * 50)
-        
-        return body_text
-        
+        with sync_playwright() as p:
+            # Launch browser with specific options for cloud compatibility
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    '--disable-gpu',
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-setuid-sandbox',
+                    '--disable-software-rasterizer'
+                ]
+            )
+            
+            page = browser.new_page()
+            print(f"Searching DuckDuckGo for: {query}")
+            
+            # Navigate and wait for content
+            page.goto(search_url, wait_until='networkidle')
+            page.wait_for_timeout(2000)  # Wait 2s for dynamic content
+            
+            # Get page content
+            body_text = page.inner_text('body')
+            print("Raw page text:")
+            print("-" * 50)
+            print(body_text[:1000])
+            print("-" * 50)
+            
+            browser.close()
+            return body_text
+            
     except Exception as e:
         print(f"Error during DuckDuckGo search: {str(e)}")
         traceback.print_exc()
         return ""
-        
-    finally:
-        try:
-            if 'driver' in locals():
-                driver.quit()
-        except:
-            pass
 
 def extract_companies_house_data(text):
     """Extract address data specifically from Companies House format text"""

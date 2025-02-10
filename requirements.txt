@@ -60,7 +60,7 @@ pandas==2.2.2
 parse==1.20.2
 phonenumbers==8.13.44
 pillow==11.1.0
-playwright==1.49.1
+playwright==1.41.0
 primp==0.10.1
 proto-plus==1.24.0
 protobuf==5.28.0
@@ -119,3 +119,4 @@ wsproto==1.2.0
 yarl==1.9.7
 zipp==3.21.0
 brotli
+webdriver-manager>=4.0.1
