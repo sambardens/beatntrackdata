@@ -26,6 +26,7 @@ from finalsave import finalize_data  # Add this import
 
 # Constants for dropdown options
 SERVICES_SUBTYPES = [
+    "Independent Record Labels",
     "Recording Studios",
     "Rehearsal Spaces",
     "Record Shops",
