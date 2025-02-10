@@ -3,6 +3,7 @@ import traceback
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from urllib.parse import quote
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 # Import regex functions from regex.py (ensure this file exists and exports them)
@@ -10,14 +11,33 @@ from regex import get_postcode_regex, get_phone_regex
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import os
+import logging
+from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from fake_useragent import UserAgent
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def initialize_driver():
     """Initialize Chrome driver with Streamlit cloud compatibility"""
+    ua = UserAgent()
     chrome_options = Options()
+    chrome_options.add_argument(f'user-agent={ua.random}')
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--disable-software-rasterizer')
+    chrome_options.add_argument('--memory-pressure-off')
+    chrome_options.add_argument('--single-process')  # Reduce memory usage
+    
+    # Add specific Streamlit cloud settings
+    if os.getenv('STREAMLIT_RUNTIME'):
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-setuid-sandbox')
     
     try:
         if os.getenv('STREAMLIT_RUNTIME'):
@@ -45,44 +65,64 @@ def initialize_driver():
             traceback.print_exc()
             raise
 
-def get_address_from_duckduckgo(name):
-    """
-    Searches DuckDuckGo for "<name> address" and scrapes all text from results.
-    """
-    query = f"{name} address"
-    search_url = f"https://duckduckgo.com/?q={query}"
-    
+def extract_address_from_results(driver):
+    """Extract address information from DuckDuckGo search results"""
+    results = driver.find_elements(By.CLASS_NAME, "result__body")
+    text = "\n".join(result.text for result in results)
+    return text
+
+def get_address_from_duckduckgo(business_name, country="United Kingdom"):
+    # Add random delay between requests
+    time.sleep(random.uniform(2, 5))
+    driver = None
     try:
+        logger.info(f"Starting DuckDuckGo search for: {business_name}")
         driver = initialize_driver()
-        if not driver:
+        
+        # Increase timeouts for Streamlit environment
+        wait = WebDriverWait(driver, 20)  # Increased from default
+        driver.set_page_load_timeout(30)
+        
+        search_query = f"{business_name} {country} address contact"
+        url = f"https://duckduckgo.com/?q={quote(search_query)}"
+        
+        logger.info(f"Navigating to: {url}")
+        driver.get(url)
+        
+        # Wait for results with explicit logging
+        try:
+            results = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "result__body")))
+            logger.info("Search results loaded successfully")
+        except TimeoutException:
+            logger.error("Timeout waiting for search results")
             return None
+            
+        # Extract and validate address
+        address_data = extract_address_from_results(driver)
         
-        print(f"Searching DuckDuckGo for: {query}")
-        driver.get(search_url)
-        
-        # Wait for any content to load
-        driver.implicitly_wait(5)
-        
-        # Get all text from the page
-        body_text = driver.find_element(By.TAG_NAME, "body").text
-        print("Raw page text:")
-        print("-" * 50)
-        print(body_text[:1000])  # Print first 1000 chars for debugging
-        print("-" * 50)
-        
-        return body_text
+        if not address_data:
+            logger.warning("No address found in results")
+            return None
+            
+        # Validate extracted data
+        if not any(address_data.values()):
+            logger.warning("Address extracted but all fields are empty")
+            return None
+            
+        logger.info(f"Successfully found address: {address_data}")
+        return address_data
         
     except Exception as e:
-        print(f"Error during DuckDuckGo search: {str(e)}")
+        logger.error(f"Error in DuckDuckGo search: {str(e)}")
         traceback.print_exc()
-        return ""
+        return None
         
     finally:
-        try:
-            if 'driver' in locals():
+        if driver:
+            try:
                 driver.quit()
-        except:
-            pass
+            except:
+                pass
 
 def extract_companies_house_data(text):
     """Extract address data specifically from Companies House format text"""

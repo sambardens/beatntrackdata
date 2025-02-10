@@ -3,6 +3,7 @@ maxMessageSize = 200
 headless = true
 enableXsrfProtection = false
 enableCORS = false
+connectTimeout = 60  # Add timeout settings
 
 [browser]
 serverAddress = "0.0.0.0"
