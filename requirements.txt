@@ -11,6 +11,16 @@ playwright==1.41.0
 pyee==11.0.1
 greenlet==3.0.3
 
+# DuckDuckGo dependencies
+duckduckgo-search==4.5.0
+duckduckpy==0.2
+selenium-stealth==1.0.6
+selenium-wire==5.1.0
+
+# Ensure these versions for Selenium compatibility
+selenium==4.24.0
+webdriver-manager==4.0.1
+
 # Rest of core dependencies
 cloudscraper==1.2.71
 openai==1.60.2
@@ -121,4 +131,4 @@ wsproto==1.2.0
 yarl==1.9.7
 zipp==3.21.0
 brotli
-webdriver-manager==4.0.1 
+webdriver-manager==4.0.1
