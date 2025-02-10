@@ -317,4 +317,28 @@ def get_patterns_for_country(user_selected_country: str):
         patterns["extra_address_pattern"] = r"((?:\d+(?:st|nd|rd|th)\s+Floor,\s+[A-Za-z']+\s+House,\s+\d+\s+Hay's\s+Lane.*))"
     return patterns
 
+def get_postcode_regex(country):
+    """Returns the appropriate postcode regex pattern for the given country."""
+    patterns = {
+        "United Kingdom": r'[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}',
+        "GB": r'[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}',
+        "UK": r'[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}',
+        "United States": r'\d{5}(?:-\d{4})?',
+        "US": r'\d{5}(?:-\d{4})?',
+        # Add more country patterns as needed
+    }
+    return patterns.get(country, "")
+
+def get_phone_regex(country):
+    """Returns the appropriate phone number regex pattern for the given country."""
+    patterns = {
+        "United Kingdom": r'(?:\+44|0)(?:\s*\(\s*0?\s*\))?[\s-]*([1-9][\d\s-]{8,})',
+        "GB": r'(?:\+44|0)(?:\s*\(\s*0?\s*\))?[\s-]*([1-9][\d\s-]{8,})',
+        "UK": r'(?:\+44|0)(?:\s*\(\s*0?\s*\))?[\s-]*([1-9][\d\s-]{8,})',
+        "United States": r'(?:\+1|1)?[\s-]?\(?([0-9]{3})\)?[\s-]?([0-9]{3})[\s-]?([0-9]{4})',
+        "US": r'(?:\+1|1)?[\s-]?\(?([0-9]{3})\)?[\s-]?([0-9]{3})[\s-]?([0-9]{4})',
+        # Add more country patterns as needed
+    }
+    return patterns.get(country, "")
+
 # Placeholder for regex helper functions if required by the application.

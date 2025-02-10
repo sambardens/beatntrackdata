@@ -38,7 +38,78 @@ def auto_download_csv(df, prefix=""):
     return
 
 def cleanup_address_lines(df):
-    # Minimal implementation: return the DataFrame unchanged
+    """Enhanced address cleanup that properly splits components"""
+    for i, row in df.iterrows():
+        full_address = str(row.get('Full address', '')).strip()
+        if not full_address:
+            continue
+
+        # 1. Ensure country is in full address
+        country = row.get('Country', '').strip()
+        if country and country.lower() not in full_address.lower():
+            if country.lower() in ['uk', 'gb']:
+                country = 'United Kingdom'
+            full_address = f"{full_address}, {country}"
+            df.at[i, 'Full address'] = full_address
+
+        # 2. Split components by comma
+        components = [comp.strip() for comp in full_address.split(',')]
+        if len(components) < 3:
+            continue  # Not enough components for valid address
+
+        # 3. Process components from end to start
+        for comp in reversed(components):
+            comp = comp.strip()
+            
+            # Check for postcode
+            if re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$', comp, re.I):
+                df.at[i, 'Post code'] = comp
+                components.remove(comp)
+                continue
+                
+            # Check for country
+            if comp.lower() in ['united kingdom', 'uk', 'great britain', 'england']:
+                df.at[i, 'Country'] = 'United Kingdom'
+                components.remove(comp)
+                continue
+                
+            # Check for known cities
+            if any(city in comp.lower() for city in ['london', 'manchester', 'birmingham', 'leeds', 'letchworth']):
+                df.at[i, 'City'] = comp
+                components.remove(comp)
+                continue
+
+        # 4. Handle remaining components
+        if components:
+            # If 3 or more components remain, combine first two for Address line 1
+            if len(components) >= 3:
+                df.at[i, 'Address line 1'] = f"{components[0]}, {components[1]}"
+                if len(components) > 3:
+                    df.at[i, 'Address line 2'] = components[2]
+                # If city wasn't found earlier, use the last component
+                if not df.at[i, 'City']:
+                    df.at[i, 'City'] = components[-1]
+            # If 2 components remain
+            elif len(components) == 2:
+                df.at[i, 'Address line 1'] = components[0]
+                df.at[i, 'Address line 2'] = components[1]
+            # If only 1 component remains
+            elif len(components) == 1:
+                df.at[i, 'Address line 1'] = components[0]
+
+        # 5. Ensure Country and Country code are set correctly
+        if df.at[i, 'Country'] == 'United Kingdom':
+            df.at[i, 'Country code'] = 'GB'
+        
+        print(f"Cleaned address for row {i}:")
+        print(f"Full address: {df.at[i, 'Full address']}")
+        print(f"Address line 1: {df.at[i, 'Address line 1']}")
+        print(f"Address line 2: {df.at[i, 'Address line 2']}")
+        print(f"City: {df.at[i, 'City']}")
+        print(f"Post code: {df.at[i, 'Post code']}")
+        print(f"Country: {df.at[i, 'Country']}")
+        print("-" * 50)
+
     return df
 
 def ensure_string_format(value):
@@ -84,45 +155,25 @@ def initialize_dataframe(df, type_value="", sub_type=""):
 # Main Processing Function
 # ---------------------------
 
-# NEW: Helper function to scan candidate pages for an address
-def extract_address_from_candidates(session, base_url, soup):
-    """
-    Automatically gathers candidate page URLs from navigation and footer elements,
-    attempts address extraction via GPT on each, and returns the first valid address.
-    """
-    candidate_links = set()
-    keywords = ['contact', 'address', 'about', 'team', 'location', 'office', 'find us']
-    # Search in nav, header, and footer
-    for section in soup.find_all(['nav', 'header', 'footer']):
-        for a in section.find_all('a', href=True):
-            text = a.get_text(separator=" ", strip=True).lower()
-            href = a['href'].lower()
-            if any(kw in text or kw in href for kw in keywords):
-                candidate_links.add(urljoin(base_url, a['href']))
+def extract_postcode_from_text(text):
+    """Extract postcode from Companies House or general text"""
+    # Look specifically for Companies House format first
+    ch_pattern = r"[Rr]egistered\s+office\s+address[^.]*?([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})"
+    ch_match = re.search(ch_pattern, text, re.IGNORECASE)
+    if ch_match:
+        return ch_match.group(1).strip()
     
-    valid_address = None
-    from gpt_helpers import extract_address_fields_gpt
-    from azure import is_postcode_valid
-    # Iterate over candidate pages (sequentially for stability)
-    for link in candidate_links:
-        try:
-            r = session.get(link, timeout=10, verify=False)
-            if r.status_code == 200:
-                candidate_soup = BeautifulSoup(r.text, "html.parser")
-                candidate_text = candidate_soup.get_text(separator=" ", strip=True)
-                candidate_addr = extract_address_fields_gpt(candidate_text, candidate_soup)
-                if candidate_addr and candidate_addr.get("Full address"):
-                    postcode = candidate_addr.get("Post code", "").strip()
-                    if is_postcode_valid(postcode):
-                        print(f"Candidate URL {link} yielded valid address.")
-                        valid_address = candidate_addr
-                        break
-        except Exception as e:
-            print(f"Error scanning candidate URL {link}: {e}")
-    return valid_address
+    # Then try general UK postcode pattern
+    uk_pattern = r"[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}"
+    postcode_matches = re.findall(uk_pattern, text, re.IGNORECASE)
+    if postcode_matches:
+        postcode = re.sub(r'\s+', ' ', postcode_matches[0].strip())
+        if re.match(r'^[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}$', postcode, re.I):
+            return postcode
+    return None
 
 def process_row(i, row, df, s, final_type, gig_synonyms):
-    """Modified process_row with correct footer extraction"""
+    """Modified process_row with better DuckDuckGo postcode handling"""
     url = str(row.get("URL", "")).strip()
     df.at[i, "Error"] = ""
     
@@ -168,60 +219,58 @@ def process_row(i, row, df, s, final_type, gig_synonyms):
         
         # Extract address with GPT
         address_data = extract_address_fields_gpt(combined_text, soup)
-        from azure import is_postcode_valid
-        if not (address_data and address_data.get("Full address") and is_postcode_valid(address_data.get("Post code", "").strip())):
-            print("Primary extraction failed; scanning candidate pages.")
-            # Call the new candidate scanning function
-            candidate_address = extract_address_from_candidates(s, final_url, soup)
-            if candidate_address and candidate_address.get("Full address"):
-                address_data = candidate_address
-                print("Candidate page extraction successful.")
-        
-        # NEW: Proxy fallback if address is still invalid
-        if not (address_data and address_data.get("Full address") and is_postcode_valid(address_data.get("Post code", "").strip())):
-            print("Address extraction still failed; attempting proxy fallback extraction.")
-            # Construct proxy URL using a default variant "https://www.{domain}"
-            proxy_fallback_url = f"https://proxyapp-hjeqhbg2h2c2baay.uksouth-01.azurewebsites.net/proxy?url=https://www.{domain}"
-            try:
-                proxy_resp = s.get(proxy_fallback_url, timeout=10, verify=False)
-                if proxy_resp.status_code == 200:
-                    proxy_soup = BeautifulSoup(proxy_resp.text, "html.parser")
-                    proxy_text = proxy_soup.get_text(separator=" ", strip=True)
-                    proxy_address = extract_address_fields_gpt(proxy_text, proxy_soup)
-                    if proxy_address and proxy_address.get("Full address") and is_postcode_valid(proxy_address.get("Post code", "").strip()):
-                        address_data = proxy_address
-                        print("Proxy fallback extraction successful.")
-                    else:
-                        print("Proxy fallback extraction did not yield valid address.")
-                else:
-                    print(f"Proxy fallback request failed with status: {proxy_resp.status_code}.")
-            except Exception as e:
-                print(f"Error during proxy fallback extraction: {e}")
-        
-        # NEW: Extra Selenium fallback if address remains invalid
-        if not (address_data and address_data.get("Full address") and is_postcode_valid(address_data.get("Post code", "").strip())):
-            print("Address extraction still failed; attempting Selenium fallback extraction.")
-            try:
-                from beatntrack_data_finder import get_contact_text_selenium
-                selenium_text = get_contact_text_selenium(final_url)
-                if selenium_text and selenium_text.strip():
-                    selenium_soup = BeautifulSoup(selenium_text, "html.parser")
-                    selenium_address = extract_address_fields_gpt(selenium_text, selenium_soup)
-                    if selenium_address and selenium_address.get("Full address") and is_postcode_valid(selenium_address.get("Post code", "").strip()):
-                        address_data = selenium_address
-                        print("Selenium fallback extraction successful.")
-                    else:
-                        print("Selenium extraction did not yield valid address.")
-                else:
-                    print("No text retrieved via Selenium fallback.")
-            except Exception as e:
-                print(f"Error during Selenium fallback extraction: {e}")
-        
         if address_data and address_data.get("Full address"):
             for field in ["Full address", "Address line 1", "Address line 2", 
                          "City", "County", "Country", "Post code", "Country code"]:
                 if field in address_data:
                     df.at[i, field] = address_data[field]
+        
+        # After GPT and other address extraction attempts fail, try DuckDuckGo
+        if not (address_data and address_data.get("Full address") and address_data.get("Post code", "").strip()):
+            try:
+                business_name = df.at[i, "Name"]
+                country = df.at[i, "Country"]
+                
+                if business_name and country:
+                    print(f"Running DuckDuckGo fallback for: {business_name} ({country})")
+                    from duckduckgo import get_address_and_phone_from_duckduckgo
+                    duck_address, duck_phones = get_address_and_phone_from_duckduckgo(business_name, country)
+                    
+                    # NEW: Check for postcode in raw text if not found
+                    if duck_address and not duck_address.get("Post code"):
+                        raw_text = duck_address.get("ScrapedText", "")
+                        if raw_text:
+                            postcode = extract_postcode_from_text(raw_text)
+                            if postcode:
+                                print(f"Found postcode in raw text: {postcode}")
+                                duck_address["Post code"] = postcode
+                                if "Full address" in duck_address:
+                                    duck_address["Full address"] = f"{duck_address['Full address']}, {postcode}"
+                    
+                    if duck_address and (duck_address.get("Full address") or duck_address.get("Post code")):
+                        # Update address fields but preserve Country/Country code
+                        for field in ["Full address", "Address line 1", "Address line 2", 
+                                    "City", "County", "Post code"]:
+                            if field in duck_address and duck_address[field]:
+                                df.at[i, field] = duck_address[field]
+                        
+                        # Merge any new phone numbers found
+                        if duck_phones:
+                            existing_phones = df.at[i, "PhoneContacts"] if isinstance(df.at[i, "PhoneContacts"], list) else []
+                            df.at[i, "PhoneContacts"] = sorted(list(set(existing_phones + duck_phones)))
+                        
+                        print("DuckDuckGo fallback successful")
+                        df.at[i, "Error"] += " | DuckDuckGo: Success"
+                    else:
+                        print("DuckDuckGo fallback found no valid address")
+                        df.at[i, "Error"] += " | DuckDuckGo: No valid address found"
+                else:
+                    print("DuckDuckGo fallback skipped - missing Name or Country")
+                    df.at[i, "Error"] += " | DuckDuckGo: Missing Name/Country"
+                    
+            except Exception as e:
+                print(f"DuckDuckGo fallback error: {str(e)}")
+                df.at[i, "Error"] += f" | DuckDuckGo error: {str(e)}"
         
         # Extract images with proxy fallback
         images = set()

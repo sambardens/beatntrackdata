@@ -174,8 +174,12 @@ def extract_address_fields_gpt(text, soup=None):
         if not postcode or not is_postcode_valid(postcode):
             print("GPT extraction: Invalid or incomplete postcode; rejecting address.")
             return None
-        
-        return result if result.get("Full address") else {}
+
+        # Keep only allowed schema fields
+        allowed_fields = ["Full address", "Address line 1", "Address line 2", "City", "County", "Country", "Post code", "Country code"]
+        filtered_result = {k: v for k, v in result.items() if k in allowed_fields}
+
+        return filtered_result if filtered_result.get("Full address") else {}
     except Exception as e:
         print(f"Address extraction error: {e}")
         return {}

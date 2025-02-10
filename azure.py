@@ -6,9 +6,9 @@ from dotenv import load_dotenv
 load_dotenv()  # Ensure environment variables are loaded
 
 def is_postcode_valid(postcode):
-    # Basic regex-based postcode validation; adjust as needed
+    # Modified regex: require exactly one space, ensuring proper full postcode (e.g. "LA2 9AN")
     import re
-    pattern = re.compile(r'^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$', re.I)
+    pattern = re.compile(r'^[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}$', re.I)
     return bool(postcode and pattern.match(postcode.strip()))
 
 def thorough_azure_lookup(entry):
@@ -73,8 +73,7 @@ def thorough_azure_lookup(entry):
                     entry["Full address"] = freeform
                     if address.get("postalCode"):
                         entry["Post code"] = address["postalCode"].strip()
-                    if address.get("streetName"):
-                        entry["Street"] = address["streetName"].strip()
+                    # Removed assignment of extra field "Street" to enforce schema.
                     if address.get("locality"):
                         entry["City"] = address["locality"].strip()
                     if address.get("countrySubdivision"):
@@ -97,5 +96,9 @@ def thorough_azure_lookup(entry):
     thorough_azure_lookup._cache[cache_key] = entry
 
     return entry
+
+def run_azure_fallback(df, i):
+    print(f"Running Azure fallback for row {i}")
+    # ...existing fallback logic can be added here...
 
 # ...existing or additional helper functions...

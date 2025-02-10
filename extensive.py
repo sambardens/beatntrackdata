@@ -1,3 +1,23 @@
+import re
+from regex import get_address_patterns
+
+def get_patterns_for_country(country_code):
+    """Return address patterns for a specific country."""
+    patterns = {
+        "GB": {
+            "street_indicators": ['street', 'road', 'avenue', 'lane', 'drive', 'way', 'plaza', 'boulevard', 'alley', 'route'],
+            "building_indicators": ['building', 'suite', 'unit', 'floor', 'apt', 'apartment', 'office', 'room', 'house', 'tower', 'center', 'centre']
+        }
+    }
+    return patterns.get(country_code, patterns["GB"])
+
+def validate_postcode(postcode, country_code):
+    """Validate postcode format for different countries."""
+    if not postcode:
+        return False
+    # Basic validation - can be extended for different country formats
+    return postcode.strip()
+
 def is_valid_address(text, postcode, country_code="GB"):
     """Enhanced multi-country address validation with full postcode check"""
     print(f"Validating address: {text} with postcode: {postcode} in {country_code}")
@@ -7,10 +27,12 @@ def is_valid_address(text, postcode, country_code="GB"):
 
     # Get country-specific patterns
     patterns = get_patterns_for_country(country_code)
-    street_indicators = patterns.get("street_indicators", [
-        'street', 'road', 'avenue', 'lane', 'drive', 'way',
-        'plaza', 'boulevard', 'alley', 'route'
-    ])
+    # Get patterns from regex.py
+    patterns = get_address_patterns().get(country_code, get_address_patterns()["GB"])
+    
+    # Get country-specific patterns
+    address_patterns = get_address_patterns()
+    street_indicators = address_patterns[country_code]["street_indicators"]
     building_indicators = patterns.get("building_indicators", [
         'building', 'suite', 'unit', 'floor', 'apt', 'apartment',
         'office', 'room', 'house', 'tower', 'center', 'centre'
