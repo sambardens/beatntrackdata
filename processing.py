@@ -8,12 +8,15 @@ from io import StringIO
 import os
 import streamlit as st
 from bs4 import BeautifulSoup
+import random
+import requests
+from requests.adapters import HTTPAdapter
+import gpt_helpers  # Add this import
 
-# Import functions from other modules.
-# (Make sure these modules exist and export the functions listed below.)
+# Import functions from other modules
 from scraper import (
     try_url_variants,
-    quick_extract_contact_info,
+    quick_extract_contact_info,  # This will now use the correct version
     quick_extract_address,
     quick_extract_images,
     find_all_images_500,
@@ -22,12 +25,11 @@ from scraper import (
     find_contact_page_url,
     get_contact_page_text,
     build_absolute_url,
-    extract_contact_info,  # Added this
-    extract_footer_content,  # Added this
-    extract_address_fields_gpt  # Added this
+    extract_contact_info,
+    extract_footer_content,
 )
-from extraction import extract_contact_info
 from gpt_helpers import extract_address_fields_gpt
+from azure import thorough_azure_lookup  # new import
 
 # ---------------------------
 # Utility Functions
@@ -39,11 +41,24 @@ def auto_download_csv(df, prefix=""):
 
 def cleanup_address_lines(df):
     # Minimal implementation: return the DataFrame unchanged
+    for i, row in df.iterrows():
+        line2 = row.get("Address line 2", "")
+        city = row.get("City", "")
+        if line2.strip().lower() == city.strip().lower():
+            df.at[i, "Address line 2"] = ""
     return df
 
 def ensure_string_format(value):
     # Minimal implementation: always return a string
     return str(value)
+
+def adaptive_delay(min_seconds, max_seconds):
+    """Add a random delay between min_seconds and max_seconds"""
+    time.sleep(min_seconds + (max_seconds - min_seconds) * random.random())
+
+def wait_for_page_load(soup):
+    """Check if the page has loaded by verifying basic HTML structure."""
+    return bool(soup and soup.find('body'))
 
 def guess_column_mapping(df_columns):
     # Minimal implementation: map "URL" to the first column if available
@@ -85,7 +100,7 @@ def initialize_dataframe(df, type_value="", sub_type=""):
 # ---------------------------
 
 def process_row(i, row, df, s, final_type, gig_synonyms):
-    """Modified process_row with correct footer extraction"""
+    """Enhanced row processing with multi-attempt Azure fallback for missing postcode"""
     url = str(row.get("URL", "")).strip()
     df.at[i, "Error"] = ""
     
@@ -97,14 +112,20 @@ def process_row(i, row, df, s, final_type, gig_synonyms):
     print(f"Processing row {i + 1}: {domain}")
     
     try:
-        # Get webpage with fallbacks
+        # Get webpage with better load verification
         resp, final_url, err = try_url_variants(s, domain)
         if not resp or resp.status_code != 200:
             df.at[i, "Error"] = err or f"HTTP {resp.status_code if resp else 'error'}"
             return
             
-        # Parse content
+        # Parse and verify content
         soup = BeautifulSoup(resp.text, "html.parser")
+        if not wait_for_page_load(soup):
+            df.at[i, "Error"] = "Page failed to load completely"
+            return
+            
+        # Add delay before content extraction
+        adaptive_delay(1, 2)
         
         # Get footer and main content
         footer_content = extract_footer_content(soup)  # Now properly imported from scraper.py
@@ -133,15 +154,9 @@ def process_row(i, row, df, s, final_type, gig_synonyms):
         address_data = extract_address_fields_gpt(combined_text, soup)
         if address_data and address_data.get("Full address"):
             for field in ["Full address", "Address line 1", "Address line 2", 
-                         "City", "County", "Post code"]:  # Exclude Country and Country code
+                         "City", "County", "Country", "Post code", "Country code"]:
                 if field in address_data:
                     df.at[i, field] = address_data[field]
-
-            # Only update Country and Country code if they are currently empty
-            if not df.at[i, "Country"] and address_data.get("Country"):
-                df.at[i, "Country"] = address_data["Country"]
-            if not df.at[i, "Country code"] and address_data.get("Country code"):
-                df.at[i, "Country code"] = address_data["Country code"]
         
         # Extract images with proxy fallback
         images = set()
@@ -161,7 +176,9 @@ def process_row(i, row, df, s, final_type, gig_synonyms):
             if size:
                 proxy_images.append(img_url)
                 
-        df.at[i, "AllImages"] = sorted(list(set(images).union(proxy_images)))
+        # Ensure AllImages is always a list
+        all_images = sorted(list(set(images).union(proxy_images)))
+        df.at[i, "AllImages"] = all_images if isinstance(all_images, list) else [all_images]
         
         # Get social media links
         social = find_social_links(soup)
@@ -183,6 +200,116 @@ def process_row(i, row, df, s, final_type, gig_synonyms):
                 if any(syn in href or syn in text for syn in gig_synonyms):
                     df.at[i, "GigListingURL"] = build_absolute_url(a_tag["href"], final_url)
                     break
+
+        # After initial scraping
+        entry = row.to_dict()
+        
+        # Enhanced Azure lookup
+        updated_entry = thorough_azure_lookup(entry)
+        
+        # Update DataFrame with enriched data
+        for key, value in updated_entry.items():
+            if value:  # Only update non-empty values
+                df.at[i, key] = value
+
+        # Multi-attempt fallback if no Post code (up to 3 tries)
+        attempt = 1
+        while attempt < 4 and not df.at[i, "Post code"]:
+            print(f"Post code still missing for {domain}: Attempt {attempt} extra fallback")
+            entry = df.loc[i].to_dict()
+            updated_entry = thorough_azure_lookup(entry)
+            if updated_entry:
+                for field in ["Full address", "Address line 1", "Address line 2", 
+                              "City", "County", "Country", "Post code", "Country code"]:
+                    if updated_entry.get(field) and not df.at[i, field]:
+                        df.at[i, field] = updated_entry[field]
+            # Optionally re-run parts of the scraping workflow (e.g. re-fetch contact page)
+            if not df.at[i, "Post code"]:
+                alt_contact_url = find_contact_page_url(soup, final_url)
+                if alt_contact_url:
+                    alt_text = get_contact_page_text(s, alt_contact_url, final_url)
+                    if alt_text:
+                        alt_address = extract_address_fields_gpt(alt_text, soup)
+                        if alt_address and alt_address.get("Post code"):
+                            for field in ["Full address", "Address line 1", "Address line 2", 
+                                          "City", "County", "Country", "Post code", "Country code"]:
+                                if alt_address.get(field):
+                                    df.at[i, field] = alt_address[field]
+            attempt += 1
+
+        # After getting ScrapedText
+        if combined_text:
+            # Extract contacts using GPT
+            gpt_contacts = gpt_helpers.extract_contacts_gpt(combined_text)
+            
+            # Convert existing contacts to lists if they're strings
+            existing_emails = df.at[i, "EmailContacts"]
+            existing_phones = df.at[i, "PhoneContacts"]
+            
+            if isinstance(existing_emails, str):
+                existing_emails = existing_emails.split(',') if existing_emails else []
+            if isinstance(existing_phones, str):
+                existing_phones = existing_phones.split(',') if existing_phones else []
+                
+            existing_contacts = {
+                "emails": existing_emails if isinstance(existing_emails, list) else [],
+                "phones": existing_phones if isinstance(existing_phones, list) else []
+            }
+            
+            merged_contacts = gpt_helpers.merge_contacts(existing_contacts, gpt_contacts)
+            
+            # Update DataFrame with merged results
+            df.at[i, "EmailContacts"] = merged_contacts["emails"]
+            df.at[i, "PhoneContacts"] = merged_contacts["phones"]
+        
+        # Get existing ScrapedText content
+        existing_text = df.at[i, "ScrapedText"]
+        if isinstance(existing_text, float):  # Handle NaN
+            existing_text = ""
+        
+        # Initialize new text collection
+        new_text_parts = []
+        
+        # Add homepage text if available
+        if main_content:
+            new_text_parts.append("Homepage Content:\n" + main_content)
+        
+        # Add contact page text if available
+        if contact_text:
+            new_text_parts.append("Contact Page Content:\n" + contact_text)
+            
+        # Add footer content if available
+        footer_content = extract_footer_content(soup)
+        if footer_content:
+            new_text_parts.append("Footer Content:\n" + footer_content)
+        
+        # Combine new text
+        new_text = "\n=====\n".join(filter(None, new_text_parts))
+        
+        # Append new text to existing text if there is any
+        if existing_text and new_text:
+            combined_text = f"{existing_text}\n=====\nNew Scrape Results:\n{new_text}"
+        else:
+            combined_text = new_text or existing_text
+            
+        # Update DataFrame with combined text
+        df.at[i, "ScrapedText"] = combined_text
+        
+        # Continue with contact extraction using combined text
+        if combined_text:
+            # Extract contacts using both methods
+            emails, phones = quick_extract_contact_info(soup, combined_text)
+            
+            # Then try GPT extraction for additional results
+            gpt_contacts = gpt_helpers.extract_contacts_gpt(combined_text)
+            
+            # Merge results
+            all_emails = set(emails + gpt_contacts.get("emails", []))
+            all_phones = set(phones + gpt_contacts.get("phones", []))
+            
+            # Update DataFrame
+            df.at[i, "EmailContacts"] = list(all_emails)
+            df.at[i, "PhoneContacts"] = list(all_phones)
         
         print(f"✓ Processed {domain} successfully")
         
@@ -190,7 +317,7 @@ def process_row(i, row, df, s, final_type, gig_synonyms):
         df.at[i, "Error"] = f"Processing error: {str(e)}"
         print(f"⚠️ Error processing row {i + 1}: {e}")
         
-    time.sleep(1)  # Rate limiting
+    adaptive_delay(2, 4)
 
 def validate_required_columns(df):
     """Check if DataFrame has minimum required columns"""
@@ -206,6 +333,26 @@ def validate_required_columns(df):
     if missing:
         return False, missing
     return True, []
+
+def run_azure_fallback_on_df(df):
+    """Improved Azure fallback that runs on every row"""
+    print("Running Azure fallback on all rows...")
+    for i, row in df.iterrows():
+        try:
+            entry = row.to_dict()
+            print(f"\nProcessing row {i+1} with Azure...")
+            updated_entry = thorough_azure_lookup(entry)
+            
+            # Update fields if Azure returned results
+            if updated_entry:
+                for field in ["Full address", "Address line 1", "Address line 2", 
+                            "City", "County", "Country", "Post code", "Country code"]:
+                    if updated_entry.get(field):
+                        df.at[i, field] = updated_entry[field]
+        except Exception as e:
+            print(f"Error in Azure fallback for row {i+1}: {e}")
+            
+    return df
 
 # ---------------------------
 # Expected Columns (for mapping)
@@ -250,6 +397,10 @@ if __name__ == "__main__":
         process_row(i, row, sample_df, session, final_type, gig_synonyms)
         time.sleep(1)
     
-    # Cleanup address lines and print the final DataFrame
+    # Cleanup address lines
     sample_df = cleanup_address_lines(sample_df)
+    
+    # Run the Azure fallback for rows missing/with invalid "Post code"
+    sample_df = run_azure_fallback_on_df(sample_df)
+    
     print(sample_df.head())
