@@ -1,6 +1,16 @@
 [server]
 maxMessageSize = 200
 headless = true
+enableXsrfProtection = false
+enableCORS = false
 
 [browser]
 serverAddress = "0.0.0.0"
+serverPort = 8501
+gatherUsageStats = false
+
+[theme]
+base = "light"
+
+[runner]
+fastReruns = false

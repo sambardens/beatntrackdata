@@ -9,20 +9,41 @@ from selenium.webdriver.support import expected_conditions as EC
 from regex import get_postcode_regex, get_phone_regex
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+import os
 
-def setup_chrome_options():
+def initialize_driver():
+    """Initialize Chrome driver with Streamlit cloud compatibility"""
     chrome_options = Options()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--disable-gpu')
-    return chrome_options
-
-def initialize_driver():
-    options = setup_chrome_options()
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
-    return driver
+    
+    try:
+        if os.getenv('STREAMLIT_RUNTIME'):
+            # Streamlit Cloud environment
+            chrome_options.binary_location = "/usr/bin/chromium-browser"
+            service = Service('/usr/bin/chromedriver')
+        else:
+            # Local environment
+            service = Service(ChromeDriverManager().install())
+        
+        driver = webdriver.Chrome(
+            service=service,
+            options=chrome_options
+        )
+        return driver
+    except Exception as e:
+        print(f"Driver initialization error: {str(e)}")
+        traceback.print_exc()
+        # Fallback to direct ChromeDriver
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+            return driver
+        except Exception as e2:
+            print(f"Fallback initialization error: {str(e2)}")
+            traceback.print_exc()
+            raise
 
 def get_address_from_duckduckgo(name):
     """
@@ -33,6 +54,8 @@ def get_address_from_duckduckgo(name):
     
     try:
         driver = initialize_driver()
+        if not driver:
+            return None
         
         print(f"Searching DuckDuckGo for: {query}")
         driver.get(search_url)
