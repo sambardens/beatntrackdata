@@ -118,7 +118,6 @@ wsproto==1.2.0
 yarl==1.9.7
 zipp==3.21.0
 brotli
-duckduckgo-search==4.1.1
 selenium-wire==5.1.0
 selenium-stealth==1.0.6
 webdriver-manager==4.0.1
