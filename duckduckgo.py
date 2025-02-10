@@ -2,22 +2,25 @@ import re
 import time
 import random
 import traceback
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from urllib.parse import quote
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-# Import regex functions from regex.py (ensure this file exists and exports them)
-from regex import get_postcode_regex, get_phone_regex
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 import os
 import logging
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from urllib.parse import quote
+
+# Selenium imports
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, WebDriverException
+from webdriver_manager.chrome import ChromeDriverManager
+
+# User agent rotation
 from fake_useragent import UserAgent
+
+# Custom regex functions
+from regex import get_postcode_regex, get_phone_regex, get_patterns_for_country
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
