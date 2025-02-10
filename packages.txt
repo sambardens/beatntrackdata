@@ -1,2 +1,4 @@
 chromium
 chromium-driver
+build-essential
+python3-dev
