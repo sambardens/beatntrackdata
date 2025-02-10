@@ -21,7 +21,6 @@ from geotext import GeoText
 import pandas as pd
 import openai  # Ensure openai is imported
 from io import BytesIO
-from typing import List, Tuple
 from regex import get_patterns_for_country   # new import
 from fallback import extensive_fallback_scrape  # new import
 
@@ -420,117 +419,62 @@ def find_social_links(soup):
 # Quick Extraction Helpers
 ########################################################################
 
-def extract_emails_from_text(text: str, soup: BeautifulSoup = None) -> List[str]:
-    """Enhanced email extraction from text and HTML"""
+def quick_extract_contact_info(text):
+    """Enhanced contact info extraction with better patterns"""
     emails = set()
-    
-    # If we have soup, look for obfuscated emails first
-    if soup:
-        # Check for mailto links
-        for link in soup.find_all('a', href=True):
-            href = link['href']
-            if href.startswith('mailto:'):
-                email = href.replace('mailto:', '').strip()
-                if '@' in email:
-                    emails.add(email)
-        
-        # Check for email-related elements
-        email_elements = soup.find_all(['span', 'div', 'p'], class_=lambda x: x and 'email' in x.lower())
-        for element in email_elements:
-            text += ' ' + element.get_text()
-    
-    # Clean text
-    text = text.replace('email hidden; JavaScript is required', '')
-    
-    # Extract using patterns
-    email_patterns = [
-        r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
-        r'([a-zA-Z0-9._%+-]+)\s*(?:\[at\]|\(at\)|@|\bat\b)\s*([a-zA-Z0-9.-]+)\s*(?:\[dot\]|\(dot\)|\bdot\b)\s*([a-zA-Z]{2,})',
-        r'(?:email|e-mail|contact|enquiries|info)[:;\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})'
-    ]
-    
-    for pattern in email_patterns:
-        matches = re.finditer(pattern, text, re.IGNORECASE)
-        for match in matches:
-            if '[at]' in pattern or '(at)' in pattern:
-                email = f"{match.group(1)}@{match.group(2)}.{match.group(3)}"
-            else:
-                email = match.group(1) if len(match.groups()) > 0 else match.group(0)
-            emails.add(email.lower())
-    
-    return list(emails)
-
-def clean_phone_number(number: str, country_code: str = "GB") -> str:
-    """Clean and standardize phone number format"""
-    try:
-        # Remove common non-digit artifacts
-        cleaned = re.sub(r'\s+|\(0\)|\(|\)|-|\.|–', '', number)
-        
-        # Handle UK numbers
-        if country_code == "GB":
-            if cleaned.startswith("0"):
-                cleaned = "+44" + cleaned[1:]
-            elif not cleaned.startswith("+"):
-                if len(cleaned) >= 10:
-                    cleaned = "+44" + cleaned
-        
-        # Parse and validate
-        parsed = phonenumbers.parse(cleaned, country_code)
-        if phonenumbers.is_valid_number(parsed):
-            return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
-    except Exception as e:
-        print(f"Phone cleaning error: {str(e)} for {number}")
-    return ""
-
-def extract_phone_numbers(text: str) -> List[str]:
-    """Extract phone numbers from text with improved formatting"""
     phones = set()
+    
+    # More comprehensive email patterns
+    email_patterns = [
+        r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}',
+        r'mailto:([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})',
+        r'(?:email|e-mail|contact|enquiries|info)[:;\s]*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})',
+        r'(?:^|[\s<(\[])([a-zA-Z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z0-9-.]+)(?:$|[\s>)\]])'
+    ]
     
     # Enhanced UK phone patterns
     phone_patterns = [
-        r'(?:Tel|T|Phone|Call|Mob)(?:ephone)?[\s:.-]*(?:\+44\s*)?(?:\(0\))?\s*((?:[\d]{4}[\s-]?[\d]{3}[\s-]?[\d]{3})|(?:[\d]{5}[\s-]?[\d]{6}))',
-        r'(?:\+44|0)(?:\s*\(\s*0?\s*\))?[\s-]*([1-9][\d\s-]{8,})',
+        r'(?:Tel|T|Phone|Call|Mob)?\s*[:.]?\s*(\+?\d[\d\s().-]{7,}\d)',
+        r'(?:\+44|0)[\d\s-]{9,}',
         r'\+\s*44\s*\(?\s*0?\s*\)?\s*([\d\s-]{10,})',
-        r'(?:telephone|mobile|landline|fax)[\s:]*(\+?44\s*\(?\s*0?\s*\)?\s*[\d\s-]{10,})',
-        r'(?:\+44|0)[-\s]*(\d{2,5}[-\s]*\d{6,})',
-        # Additional pattern for international format
-        r'\+[1-9][0-9\s-]{10,}'
+        r'(?:tel|phone|t|call|contact|mob)(?:ephone)?[\s:.-]*(?:\+44\s*)?(?:\(0\))?\s*((?:[\d]{4}[\s-]?[\d]{3}[\s-]?[\d]{3})|(?:[\d]{5}[\s-]?[\d]{6}))'
     ]
     
+    # Clean text
+    text = text.replace('\n', ' ').replace('(0)', '')
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Process emails
+    for pattern in email_patterns:
+        found = re.finditer(pattern, text, re.IGNORECASE)
+        for match in found:
+            email = match.group(1) if len(match.groups()) > 0 else match.group(0)
+            email = email.lower().strip()
+            if '@' in email and '.' in email.split('@')[1]:
+                emails.add(email)
+                print(f"Found email: {email}")
+    
+    # Process phones
     for pattern in phone_patterns:
         matches = re.finditer(pattern, text, re.IGNORECASE)
         for match in matches:
             number = match.group(1) if len(match.groups()) > 0 else match.group(0)
-            clean_number = clean_phone_number(number)
-            if clean_number:
-                phones.add(clean_number)
-                print(f"Found phone: {clean_number}")
+            try:
+                cleaned = re.sub(r'[^\d+]', '', number)
+                if cleaned.startswith('0'):
+                    cleaned = '+44' + cleaned[1:]
+                elif not cleaned.startswith('+'):
+                    if len(cleaned) >= 10:
+                        cleaned = '+44' + cleaned
+                parsed = phonenumbers.parse(cleaned, "GB")
+                if phonenumbers.is_valid_number(parsed):
+                    formatted = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
+                    phones.add(formatted)
+                    print(f"Found phone: {formatted}")
+            except Exception as e:
+                continue
     
-    return list(phones)
-
-def quick_extract_contact_info(soup: BeautifulSoup, text: str) -> Tuple[List[str], List[str]]:
-    """Extract contact information from webpage"""
-    # Get emails using enhanced extraction
-    emails = extract_emails_from_text(text, soup)
-    
-    # Get phone numbers
-    phones = extract_phone_numbers(text)
-    
-    # Additional email extraction from common locations
-    contact_sections = soup.find_all(['div', 'section'], class_=lambda x: x and 'contact' in x.lower())
-    for section in contact_sections:
-        section_emails = extract_emails_from_text(section.get_text(), section)
-        emails.extend(section_emails)
-    
-    # Clean and validate emails
-    valid_emails = []
-    for email in emails:
-        email = email.lower().strip()
-        if '@' in email and '.' in email.split('@')[1]:
-            if not any(invalid in email for invalid in ['example.com', 'domain.com', 'yourdomain']):
-                valid_emails.append(email)
-    
-    return list(set(valid_emails)), list(set(phones))
+    return {"emails": sorted(list(emails)), "phones": sorted(list(phones))}
 
 def quick_extract_address(text, country="UK"):
     """
@@ -655,7 +599,7 @@ def find_contact_page_url(soup, base_url):
     for a_tag in soup.find_all('a', href=True):
         href = a_tag.get('href', '').strip()
         text = a_tag.get_text(separator=' ', strip=True).lower()
-        if any(keyword in href.lower() or text for keyword in contact_keywords):
+        if any(keyword in href.lower() or keyword in text for keyword in contact_keywords):
             return urljoin(base_url, href)
     if "prsformusic.com" in base_url or "prsmusic.com" in base_url:
         fallback_paths = [
@@ -694,138 +638,44 @@ def get_about_page_text(session, url):
         pass
     return ""
 
-def find_all_contact_pages(soup, base_url):
-    """Find all potential contact page URLs in the soup"""
-    contact_urls = set()
-    contact_keywords = ['contact', 'get-in-touch', 'reach-us', 'enquiry', 'enquiries']
-    
-    for a in soup.find_all('a', href=True):
-        href = a.get('href', '').lower()
-        text = a.get_text(strip=True).lower()
-        if any(keyword in href or text for keyword in contact_keywords):
-            full_url = urljoin(base_url, a['href'])
-            contact_urls.add(full_url)
-    
-    return list(contact_urls)
-
-def scrape_all_contact_pages(session, urls, base_url):
-    """Scrape text content from all contact pages"""
-    combined_texts = []
-    
-    for url in urls:
-        try:
-            r = session.get(url, timeout=10, verify=False)
-            if r.status_code == 200:
-                soup = BeautifulSoup(r.text, "html.parser")
-                
-                # Look for contact-specific elements
-                contact_elements = soup.find_all(['div', 'section', 'article'], 
-                    class_=lambda x: x and ('contact' in x.lower() or 'address' in x.lower()))
-                
-                for element in contact_elements:
-                    text = element.get_text(separator=' ', strip=True)
-                    if text:
-                        combined_texts.append(text)
-                
-                # Also get the main content if specific elements weren't found
-                if not combined_texts:
-                    main_content = soup.find('main') or soup.find('article') or soup.find('body')
-                    if main_content:
-                        combined_texts.append(main_content.get_text(separator=' ', strip=True))
-                        
-        except Exception as e:
-            print(f"Error scraping contact page {url}: {e}")
-            continue
-            
-    return ' '.join(combined_texts) if combined_texts else None
-
 def get_contact_page_text(session, url, base_url):
-    """Enhanced contact page text extraction with better priorities and retries"""
+    """
+    Enhanced contact page text extraction using Selenium first,
+    then falling back to regular requests and common subpage paths.
+    """
     print(f"\nProcessing contact page: {url}")
-    
-    # Prioritized list of pages to check for specific sites
-    priority_paths = {
-        "prsformusic.com": [
-            "/about-us/corporate-information",  # Corporate info first
-            "/about-us",  # About page often has address
-            "/contact-us",  # Standard contact
-            "/help/contact-us",  # Help contact
-            "/about/contact",  # Alternative contact
-        ],
-        "default": [
-            "/contact",
-            "/contact-us",
-            "/about-us",
-            "/about/contact",
-            "/help/contact-us"
-        ]
-    }
-
-    # Known address patterns for specific sites
-    address_patterns = {
-        "prsformusic.com": [
-            r"(?:41|forty[ -]one)\s*streatham\s*high\s*road",
-            r"streatham,?\s*london\s*sw16",
-            r"pancras\s*square",
-            r"kings?\s*cross",
-            r"[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}"  # UK postcode
-        ]
-    }
-
-    def check_page_for_address(page_url, patterns):
-        """Helper to check a single page for address patterns"""
-        try:
-            r = session.get(page_url, timeout=10, verify=False)
-            if r.status_code == 200:
-                soup = BeautifulSoup(r.text, 'html.parser')
-                
-                # First check specific sections
-                for section in ['address', 'location', 'contact-details', 'vcard']:
-                    elements = soup.find_all(class_=lambda x: x and section in x.lower())
-                    for elem in elements:
-                        text = elem.get_text(separator=' ', strip=True)
-                        if any(re.search(pattern, text, re.I) for pattern in patterns):
-                            print(f"Found address in {section} section: {text}")
-                            return text
-
-                # Then check general page content
-                text = soup.get_text(separator=' ', strip=True)
-                if any(re.search(pattern, text, re.I) for pattern in patterns):
-                    print(f"Found address in page content")
-                    return text
-        except Exception as e:
-            print(f"Error checking {page_url}: {e}")
-        return None
-
-    # Get domain-specific settings
-    domain = base_url.split('/')[2].lower()
-    base_domain = re.sub(r'^www\.', '', domain)
-    paths = priority_paths.get(base_domain, priority_paths["default"])
-    patterns = address_patterns.get(base_domain, [r"[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}"])
-
-    # Try each priority path
-    for path in paths:
-        full_url = urljoin(base_url, path)
-        print(f"Checking priority path: {full_url}")
-        result = check_page_for_address(full_url, patterns)
-        if result:
-            return result
-
-    # Fallback to footer content if no address found
+    selenium_text = get_contact_text_selenium(url)
+    if selenium_text and is_valid_contact_text(selenium_text):
+        return selenium_text
     try:
-        r = session.get(base_url, timeout=10, verify=False)
+        r = session.get(url, timeout=10, verify=False)
         if r.status_code == 200:
-            soup = BeautifulSoup(r.text, 'html.parser')
-            footer = soup.find('footer')
-            if footer:
-                text = footer.get_text(separator=' ', strip=True)
-                if any(re.search(pattern, text, re.I) for pattern in patterns):
-                    print("Found address in footer")
-                    return text
+            request_text = r.text
+            if is_valid_contact_text(request_text):
+                return request_text
     except Exception as e:
-        print(f"Error checking footer: {e}")
-
-    return None
+        print(f"Request error: {e}")
+    if "prsformusic.com" in base_url:
+        forced_url = urljoin(base_url, "/help/contact-us")
+        forced_text = get_contact_text_selenium(forced_url)
+        extracted_address = quick_extract_address(forced_text or "")
+        if extracted_address:
+            return extracted_address
+    fallback_paths = ['/help/contact-us', '/contact', '/about/contact']
+    for path in fallback_paths:
+        fallback_url = base_url.rstrip('/') + path
+        print(f"Attempting fallback URL: {fallback_url}")
+        try:
+            r = session.get(fallback_url, timeout=10, verify=False)
+            if r.status_code == 200:
+                fallback_text = r.text
+                if is_valid_contact_text(fallback_text):
+                    return fallback_text
+        except Exception as e:
+            print(f"Fallback URL error: {e}")
+    print("No valid contact text found; attempting extended fallback search.")
+    fallback_text = extensive_fallback_scrape(session, url)
+    return fallback_text
 
 ########################################################################
 # Contact Info Extraction
@@ -847,7 +697,7 @@ def extract_contact_info(text):
         r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}',
         r'mailto:([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})',
         r'(?:email|e-mail|contact|enquiries|info)[:;\s]*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})',
-        r'(?:^|[\s<(\[])([a-zA-Z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z0-9-.]+)(?:$|[\s>)\]])',
+        r'(?:^|[\s<(\[])([a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)(?:$|[\s>)\]])',
         r'data-email=["\']([^"\']+)["\']',  # Hidden in data attributes
         r'class=["\']email["\'][^>]*>([^<]+)'  # Common email class pattern
     ]
@@ -875,9 +725,25 @@ def extract_contact_info(text):
                 emails.add(email)
                 print(f"Found email: {email}")
 
-    # Process phones with improved formatting
-    phone_matches = extract_phone_numbers(text)
-    phones.update(phone_matches)
+    # Process phones
+    for pattern in phone_patterns:
+        matches = re.finditer(pattern, text, re.IGNORECASE)
+        for match in matches:
+            number = match.group(1) if len(match.groups()) > 0 else match.group(0)
+            try:
+                cleaned = re.sub(r'[^\d+]', '', number)
+                if cleaned.startswith('0'):
+                    cleaned = '+44' + cleaned[1:]
+                elif not cleaned.startswith('+') and len(cleaned) >= 10:
+                    cleaned = '+44' + cleaned
+                    
+                parsed = phonenumbers.parse(cleaned, "GB")
+                if phonenumbers.is_valid_number(parsed):
+                    formatted = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
+                    phones.add(formatted)
+                    print(f"Found phone: {formatted}")
+            except Exception as e:
+                print(f"Phone parsing error: {str(e)} for {number}")
 
     return {
         "emails": sorted(list(emails)),
@@ -897,7 +763,7 @@ def extract_footer_content(soup):
     
     # Method 1: Standard footer tag
     footer = soup.find('footer')
-    if (footer):
+    if footer:
         footer_text.append(footer.get_text(separator=' ', strip=True))
     
     # Method 2: Elements with footer-like classes or IDs
@@ -907,6 +773,7 @@ def extract_footer_content(soup):
         
         # Bottom area selectors
         '[class*="bottom"]', '[class*="btm"]',
+        '[id*="bottom"]', '[id*="btm"]',
         
         # Common info containers
         '.site-info', '.contact-info', '.info-section',

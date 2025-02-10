@@ -168,6 +168,13 @@ def extract_address_fields_gpt(text, soup=None):
         )
         raw_json = response.choices[0].message.content.strip()
         result = json.loads(raw_json) if raw_json else {}
+        
+        from azure import is_postcode_valid
+        postcode = result.get("Post code", "").strip()
+        if not postcode or not is_postcode_valid(postcode):
+            print("GPT extraction: Invalid or incomplete postcode; rejecting address.")
+            return None
+        
         return result if result.get("Full address") else {}
     except Exception as e:
         print(f"Address extraction error: {e}")
