@@ -1,0 +1,6 @@
+[server]
+maxMessageSize = 200
+headless = true
+
+[browser]
+serverAddress = "0.0.0.0"
