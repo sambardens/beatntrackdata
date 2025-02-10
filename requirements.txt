@@ -6,13 +6,12 @@ beautifulsoup4==4.12.3
 Pillow==11.1.0
 python-dotenv==1.0.1
 
-# Selenium and related
-selenium==4.24.0
+# Selenium and WebDriver related
+selenium==4.17.2
+webdriver-manager==4.0.1
 selenium-wire==5.1.0
 selenium-stealth==1.0.6
-webdriver-manager==4.0.1
-undetected-chromedriver==3.5.5
-fake-useragent==2.0.3
+chromedriver-autoinstaller==0.6.4
 
 # Web scraping and networking
 aiohttp==3.11.12
@@ -24,6 +23,12 @@ pyee==12.0.0
 async-timeout==5.0.1
 playwright==1.49.1
 cloudscraper
+
+# Custom regex utilities (ensure regex.py exists in your project)
+python-regex==2023.12.25
+
+# Operating System and Path handling
+pathlib==1.0.1
 
 # Other dependencies
 geotext
