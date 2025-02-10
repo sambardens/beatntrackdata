@@ -176,6 +176,47 @@ def process_row(i, row, df, s, final_type, gig_synonyms):
             if candidate_address and candidate_address.get("Full address"):
                 address_data = candidate_address
                 print("Candidate page extraction successful.")
+        
+        # NEW: Proxy fallback if address is still invalid
+        if not (address_data and address_data.get("Full address") and is_postcode_valid(address_data.get("Post code", "").strip())):
+            print("Address extraction still failed; attempting proxy fallback extraction.")
+            # Construct proxy URL using a default variant "https://www.{domain}"
+            proxy_fallback_url = f"https://proxyapp-hjeqhbg2h2c2baay.uksouth-01.azurewebsites.net/proxy?url=https://www.{domain}"
+            try:
+                proxy_resp = s.get(proxy_fallback_url, timeout=10, verify=False)
+                if proxy_resp.status_code == 200:
+                    proxy_soup = BeautifulSoup(proxy_resp.text, "html.parser")
+                    proxy_text = proxy_soup.get_text(separator=" ", strip=True)
+                    proxy_address = extract_address_fields_gpt(proxy_text, proxy_soup)
+                    if proxy_address and proxy_address.get("Full address") and is_postcode_valid(proxy_address.get("Post code", "").strip()):
+                        address_data = proxy_address
+                        print("Proxy fallback extraction successful.")
+                    else:
+                        print("Proxy fallback extraction did not yield valid address.")
+                else:
+                    print(f"Proxy fallback request failed with status: {proxy_resp.status_code}.")
+            except Exception as e:
+                print(f"Error during proxy fallback extraction: {e}")
+        
+        # NEW: Extra Selenium fallback if address remains invalid
+        if not (address_data and address_data.get("Full address") and is_postcode_valid(address_data.get("Post code", "").strip())):
+            print("Address extraction still failed; attempting Selenium fallback extraction.")
+            try:
+                from beatntrack_data_finder import get_contact_text_selenium
+                selenium_text = get_contact_text_selenium(final_url)
+                if selenium_text and selenium_text.strip():
+                    selenium_soup = BeautifulSoup(selenium_text, "html.parser")
+                    selenium_address = extract_address_fields_gpt(selenium_text, selenium_soup)
+                    if selenium_address and selenium_address.get("Full address") and is_postcode_valid(selenium_address.get("Post code", "").strip()):
+                        address_data = selenium_address
+                        print("Selenium fallback extraction successful.")
+                    else:
+                        print("Selenium extraction did not yield valid address.")
+                else:
+                    print("No text retrieved via Selenium fallback.")
+            except Exception as e:
+                print(f"Error during Selenium fallback extraction: {e}")
+        
         if address_data and address_data.get("Full address"):
             for field in ["Full address", "Address line 1", "Address line 2", 
                          "City", "County", "Country", "Post code", "Country code"]:
