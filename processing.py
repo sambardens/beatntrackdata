@@ -28,6 +28,7 @@ from scraper import (
 )
 from extraction import extract_contact_info
 from gpt_helpers import extract_address_fields_gpt
+from duckduckgo import get_address_and_phone_from_duckduckgo
 
 # ---------------------------
 # Utility Functions
@@ -38,7 +39,78 @@ def auto_download_csv(df, prefix=""):
     return
 
 def cleanup_address_lines(df):
-    # Minimal implementation: return the DataFrame unchanged
+    """Enhanced address cleanup that properly splits components"""
+    for i, row in df.iterrows():
+        full_address = str(row.get('Full address', '')).strip()
+        if not full_address:
+            continue
+
+        # 1. Ensure country is in full address
+        country = row.get('Country', '').strip()
+        if country and country.lower() not in full_address.lower():
+            if country.lower() in ['uk', 'gb']:
+                country = 'United Kingdom'
+            full_address = f"{full_address}, {country}"
+            df.at[i, 'Full address'] = full_address
+
+        # 2. Split components by comma
+        components = [comp.strip() for comp in full_address.split(',')]
+        if len(components) < 3:
+            continue  # Not enough components for valid address
+
+        # 3. Process components from end to start
+        for comp in reversed(components):
+            comp = comp.strip()
+            
+            # Check for postcode
+            if re.match(r'^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$', comp, re.I):
+                df.at[i, 'Post code'] = comp
+                components.remove(comp)
+                continue
+                
+            # Check for country
+            if comp.lower() in ['united kingdom', 'uk', 'great britain', 'england']:
+                df.at[i, 'Country'] = 'United Kingdom'
+                components.remove(comp)
+                continue
+                
+            # Check for known cities
+            if any(city in comp.lower() for city in ['london', 'manchester', 'birmingham', 'leeds', 'letchworth']):
+                df.at[i, 'City'] = comp
+                components.remove(comp)
+                continue
+
+        # 4. Handle remaining components
+        if components:
+            # If 3 or more components remain, combine first two for Address line 1
+            if len(components) >= 3:
+                df.at[i, 'Address line 1'] = f"{components[0]}, {components[1]}"
+                if len(components) > 3:
+                    df.at[i, 'Address line 2'] = components[2]
+                # If city wasn't found earlier, use the last component
+                if not df.at[i, 'City']:
+                    df.at[i, 'City'] = components[-1]
+            # If 2 components remain
+            elif len(components) == 2:
+                df.at[i, 'Address line 1'] = components[0]
+                df.at[i, 'Address line 2'] = components[1]
+            # If only 1 component remains
+            elif len(components) == 1:
+                df.at[i, 'Address line 1'] = components[0]
+
+        # 5. Ensure Country and Country code are set correctly
+        if df.at[i, 'Country'] == 'United Kingdom':
+            df.at[i, 'Country code'] = 'GB'
+        
+        print(f"Cleaned address for row {i}:")
+        print(f"Full address: {df.at[i, 'Full address']}")
+        print(f"Address line 1: {df.at[i, 'Address line 1']}")
+        print(f"Address line 2: {df.at[i, 'Address line 2']}")
+        print(f"City: {df.at[i, 'City']}")
+        print(f"Post code: {df.at[i, 'Post code']}")
+        print(f"Country: {df.at[i, 'Country']}")
+        print("-" * 50)
+
     return df
 
 def ensure_string_format(value):
@@ -84,8 +156,25 @@ def initialize_dataframe(df, type_value="", sub_type=""):
 # Main Processing Function
 # ---------------------------
 
+def extract_postcode_from_text(text):
+    """Extract postcode from Companies House or general text"""
+    # Look specifically for Companies House format first
+    ch_pattern = r"[Rr]egistered\s+office\s+address[^.]*?([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})"
+    ch_match = re.search(ch_pattern, text, re.IGNORECASE)
+    if ch_match:
+        return ch_match.group(1).strip()
+    
+    # Then try general UK postcode pattern
+    uk_pattern = r"[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}"
+    postcode_matches = re.findall(uk_pattern, text, re.IGNORECASE)
+    if postcode_matches:
+        postcode = re.sub(r'\s+', ' ', postcode_matches[0].strip())
+        if re.match(r'^[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}$', postcode, re.I):
+            return postcode
+    return None
+
 def process_row(i, row, df, s, final_type, gig_synonyms):
-    """Modified process_row with correct footer extraction"""
+    """Modified process_row with better DuckDuckGo integration"""
     url = str(row.get("URL", "")).strip()
     df.at[i, "Error"] = ""
     
@@ -136,6 +225,45 @@ def process_row(i, row, df, s, final_type, gig_synonyms):
                          "City", "County", "Country", "Post code", "Country code"]:
                 if field in address_data:
                     df.at[i, field] = address_data[field]
+        
+        # After GPT address extraction fails or returns empty results, try DuckDuckGo
+        if not df.at[i, "Post code"].strip():
+            try:
+                business_name = df.at[i, "Name"]
+                country = df.at[i, "Country"] or "United Kingdom"  # Default to UK if not specified
+                
+                if business_name:
+                    print(f"Running DuckDuckGo search for: {business_name}")
+                    duck_address, duck_phones = get_address_and_phone_from_duckduckgo(business_name, country)
+                    
+                    if duck_address:
+                        # Update address fields
+                        for field in ["Full address", "Address line 1", "Address line 2", 
+                                    "City", "County", "Post code"]:
+                            if field in duck_address and duck_address[field]:
+                                df.at[i, field] = duck_address[field]
+                                print(f"DuckDuckGo found {field}: {duck_address[field]}")
+                        
+                        # Merge any new phone numbers found
+                        if duck_phones:
+                            existing_phones = df.at[i, "PhoneContacts"]
+                            if isinstance(existing_phones, list):
+                                df.at[i, "PhoneContacts"] = sorted(list(set(existing_phones + duck_phones)))
+                            else:
+                                df.at[i, "PhoneContacts"] = duck_phones
+                            
+                        print("DuckDuckGo search successful")
+                        df.at[i, "Error"] = (df.at[i, "Error"] or "") + " | DuckDuckGo: Success"
+                    else:
+                        print("DuckDuckGo found no valid address")
+                        df.at[i, "Error"] = (df.at[i, "Error"] or "") + " | DuckDuckGo: No address found"
+                else:
+                    print("Skipping DuckDuckGo - no business name")
+                    df.at[i, "Error"] = (df.at[i, "Error"] or "") + " | DuckDuckGo: No business name"
+                    
+            except Exception as e:
+                print(f"DuckDuckGo error: {str(e)}")
+                df.at[i, "Error"] = (df.at[i, "Error"] or "") + f" | DuckDuckGo error: {str(e)}"
         
         # Extract images with proxy fallback
         images = set()
